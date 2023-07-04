@@ -55,10 +55,7 @@ def get_utmp_data() -> list[Session]:
         buffer = fd.read()
         for record in utmp.read(buffer):
             if record.type == utmp.UTmpRecordType.user_process:
-                if record.host != '':
-                    users.append(Session(record.user, record.line, record.host, record.sec))
-                else:
-                    users.append(Session(record.user, record.line, 'localhost', record.sec))
+                    users.append(Session(record.user, record.line, record.host or 'localhost', record.sec))
     return users
 
 
