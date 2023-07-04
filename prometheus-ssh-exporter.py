@@ -95,12 +95,12 @@ def parse_arguments() -> None:
         prog='python prometheus-ssh-exporter.py',
         description='Prometheus exporter for info about SSH sessions')
     parser.add_argument('-H', '--host', type=str,
-                        default='0.0.0.0', help='Hostname to bind to')
+                        default=SERVER_HOST, help='Hostname to bind to')
     parser.add_argument('-p', '--port', type=int, default=SERVER_PORT,
                         help='Port for the server to listen to')
-    parser.add_argument('-i', '--interval', type=int, default=15,
+    parser.add_argument('-i', '--interval', type=int, default=FETCH_INTERVAL,
                         help='Interval in seconds to fetch SSH sessions data')
-    parser.add_argument('-f', '--file', type=str, default='/var/run/utmp',
+    parser.add_argument('-f', '--file', type=str, default=WATCHFILE,
                         help='File that changes every time a new SSH session is opened or closed')
 
     args = parser.parse_args()
