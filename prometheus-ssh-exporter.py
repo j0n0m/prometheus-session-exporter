@@ -78,13 +78,13 @@ def handle_sessions_changed() -> None:
         # Looking for newly found SSH sessions
         if not maybe_new_session in old_session_data:
             print("Session connected: %s" % maybe_new_session.from_)
-            gauge_num_sessions.labels(remote_ip=maybe_new_session.from_).inc()
+            gauge_num_sessions.labels(remote_ip=maybe_new_session.from_, user=session.name).inc()
 
     for maybe_old_session in old_session_data:
         # Looking for SSH sessions that no longer exist
         if not maybe_old_session in session_data:
             print("Session disconnected: %s" % maybe_old_session.from_)
-            gauge_num_sessions.labels(remote_ip=maybe_old_session.from_).dec()
+            gauge_num_sessions.labels(remote_ip=maybe_old_session.from_, user=session.name).dec()
 
 
 
@@ -126,7 +126,7 @@ if __name__ == '__main__':
     prometheus_client.start_http_server(SERVER_PORT)
     print("Started metrics server bound to {}:{}".format(SERVER_HOST, SERVER_PORT))
     gauge_num_sessions = prometheus_client.Gauge(
-        'ssh_num_sessions', 'Number of SSH sessions', ['remote_ip'])
+        'ssh_num_sessions', 'Number of SSH sessions', ['remote_ip', 'user'])
     
     # session_data contains the current list of sessions
     session_data = get_utmp_data()
@@ -134,7 +134,7 @@ if __name__ == '__main__':
     
     # Initial metrics
     for session in session_data:
-        gauge_num_sessions.labels(remote_ip=session.from_).inc()
+        gauge_num_sessions.labels(remote_ip=session.from_, user=session.name).inc()
         print("Initial connection: {}".format(session.from_))
 
 
