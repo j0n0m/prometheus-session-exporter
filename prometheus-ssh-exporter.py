@@ -99,7 +99,7 @@ def parse_arguments() -> None:
         description='Prometheus exporter for info about SSH sessions')
     parser.add_argument('-H', '--host', type=str,
                         default='0.0.0.0', help='Hostname to bind to')
-    parser.add_argument('-p', '--port', type=int, default=9999,
+    parser.add_argument('-p', '--port', type=int, default=SERVER_PORT,
                         help='Port for the server to listen to')
     parser.add_argument('-i', '--interval', type=int, default=15,
                         help='Interval in seconds to fetch SSH sessions data')
