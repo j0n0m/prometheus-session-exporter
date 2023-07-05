@@ -9,7 +9,7 @@ from datetime import datetime
 
 
 # These defaults can be overwritten by command line arguments
-SERVER_HOST = "0.0.0.0"
+SERVER_HOST = "127.0.0.1"
 SERVER_PORT = 9999
 FETCH_INTERVAL = 15
 WATCHFILE = "/var/run/utmp"
