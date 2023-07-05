@@ -28,7 +28,7 @@ class FileOpenedHandler(FileSystemEventHandler):
 
 
 class Session:
-    """ This class is used to create a Session object containing info on an SSH session, mainly for readability """
+    """ This class is used to create a Session object containing info on a session, mainly for readability """
 
     def __init__(self, user : str, tty : str, ip_addr : str, login_time : str):
         self.user = user # Username that is logged in
@@ -56,7 +56,7 @@ def get_utmp_data() -> list[Session]:
     """
     Returns a list of Session Objects
     The function uses the utmp library. The utmp file contains information about ALL currently logged in users,
-    including local users (not SSH sessions). We filter out the local users by checking if the remote IP address
+    including local users. We filter out the local users by checking if the remote IP address
     is empty and set the hostname for the local sessions to "localhost".
     """
     sessions : list[Session] = []
@@ -72,7 +72,7 @@ def get_utmp_data() -> list[Session]:
 
 def handle_sessions_changed() -> None:
     """ 
-    This function fetches the current list of SSH sessions and compares it to the previous list of SSH sessions.
+    This function fetches the current list of sessions and compares it to the previous list of sessions.
     If the number of sessions has changed, it adds or removes labelsets to the gauge_num_sessions metric.
     """
     global sessions, gauge_num_sessions
@@ -80,14 +80,14 @@ def handle_sessions_changed() -> None:
     new_sessions = get_utmp_data()
 
     for new_session in new_sessions:
-        # Looking for newly found SSH sessions
+        # Looking for newly found sessions
         if not new_session in sessions:
             print(f"New session detected: {str(new_session)}")
             sessions.append(new_session)
             gauge_num_sessions.labels(user=new_session.user, tty=new_session.tty, remote_ip=new_session.ip_addr, login_time=new_session.login_time).set_function(gauge_num_sessions_func_decorator(new_session))
 
     for old_session in sessions:
-        # Looking for SSH sessions that no longer exist
+        # Looking for sessions that no longer exist
         if not old_session in new_sessions:
             print(f"Closed session detected: {str(old_session)}")
             # prevent losing this session between prometheus scrapes
@@ -106,15 +106,15 @@ def parse_arguments() -> None:
 
     parser = argparse.ArgumentParser(
         prog="python prometheus-ssh-exporter.py",
-        description="Prometheus exporter for info about SSH sessions")
+        description="Prometheus exporter for info about sessions")
     parser.add_argument("-H", "--host", type=str,
                         default=SERVER_HOST, help="Hostname to bind to")
     parser.add_argument("-p", "--port", type=int, default=SERVER_PORT,
                         help="Port for the server to listen to")
     parser.add_argument("-i", "--interval", type=int, default=FETCH_INTERVAL,
-                        help="Interval in seconds to fetch SSH sessions data")
+                        help="Interval in seconds to fetch sessions data")
     parser.add_argument("-f", "--file", type=str, default=WATCHFILE,
-                        help="File that changes every time a new SSH session is opened or closed")
+                        help="File that changes every time a new session is opened or closed")
 
     args = parser.parse_args()
     FETCH_INTERVAL = args.interval
@@ -196,9 +196,9 @@ class RobustGauge(prometheus_client.Gauge):
 
 if __name__ == "__main__":
     """
-    This program exports the number of SSH sessions as a metric "ssh_num_sessions" for prometheus.
+    This program exports the number of sessions as a metric "num_sessions" for prometheus.
     It applies labelsets to the gauge, containing the username, tty, remote IP address, and time of login.
-    That way we can filter by the remote IP in Grafana, getting the number of SSH sessions by IP address,
+    That way we can filter by the remote IP in Grafana, getting the number of sessions by IP address,
     or sum them up to get the total number of sessions.
     """
 
@@ -215,7 +215,7 @@ if __name__ == "__main__":
         labels.remove("login_time")
     
     gauge_num_sessions = RobustGauge(
-        "ssh_num_sessions", "Number of SSH sessions", labels)
+        "num_sessions", "Number of sessions", labels)
     
     # sessions contains the current list of sessions
     sessions = get_utmp_data()
@@ -228,7 +228,7 @@ if __name__ == "__main__":
 
     """
     Start the watchdog to monitor the WATCHDOG file for changes. 
-    This is used to immediately look for changes in the SSH sessions when a new session is opened or closed
+    This is used to immediately look for changes in the sessions when a new session is opened or closed
     to prevent missing any sessions that lasted less than the FETCH_INTERVAL.
     """
     print(f"Watching file {WATCHFILE} for changes...")
@@ -242,11 +242,11 @@ if __name__ == "__main__":
     print(f"Started metrics server bound to {SERVER_HOST}:{SERVER_PORT}")
 
     # Generate some requests.
-    print(f"Looking for SSH connection changes at interval {FETCH_INTERVAL}")
+    print(f"Looking for connection changes at interval {FETCH_INTERVAL}")
     try:
 
         while True:
-            # Keep looking for changes in the SSH sessions in case the watchdog missed something
+            # Keep looking for changes in the sessions in case the watchdog missed something
             handle_sessions_changed()
             time.sleep(FETCH_INTERVAL)
 
