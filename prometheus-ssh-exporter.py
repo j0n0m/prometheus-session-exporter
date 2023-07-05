@@ -63,16 +63,13 @@ def get_utmp_data() -> list[Session]:
 def handle_sessions_changed() -> None:
     """ 
     This function fetches the current list of SSH sessions and compares it to the previous list of SSH sessions.
-    If the number of sessions has changed, it increments or decrements the gauge_num_sessions metric
-    and updates the session_data and num_sessions variables.
+    If the number of sessions has changed, it increments or decrements the gauge_num_sessions metric.
     """
-    global session_data, num_sessions, gauge_num_sessions, old_session_data, old_num_sessions
+    global session_data, gauge_num_sessions, old_session_data
 
     old_session_data = session_data
-    old_num_sessions = len(old_session_data)
 
     session_data = get_utmp_data()
-    num_sessions = len(session_data)
 
     for maybe_new_session in session_data:
         # Looking for newly found SSH sessions
@@ -127,7 +124,6 @@ if __name__ == '__main__':
     
     # session_data contains the current list of sessions
     session_data = get_utmp_data()
-    num_sessions = len(session_data)
     
     # Initial metrics
     for session in session_data:
