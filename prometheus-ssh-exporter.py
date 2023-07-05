@@ -65,7 +65,7 @@ def handle_sessions_changed() -> None:
     This function fetches the current list of SSH sessions and compares it to the previous list of SSH sessions.
     If the number of sessions has changed, it increments or decrements the gauge_num_sessions metric.
     """
-    global session_data, gauge_num_sessions, old_session_data
+    global session_data, gauge_num_sessions
 
     old_session_data = session_data
 
