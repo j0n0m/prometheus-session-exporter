@@ -4,7 +4,7 @@ import argparse
 import utmp
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler, FileModifiedEvent
-from typing import Callable
+from typing import Callable, Any
 from datetime import datetime
 
 
@@ -14,6 +14,12 @@ SERVER_PORT = 9999
 FETCH_INTERVAL = 15
 WATCHFILE = "/var/run/utmp"
 
+# Disable labels as you wish
+# Except disabling all, that's broken right now :)
+DISABLE_USER_LABEL = False
+DISABLE_TTY_LABEL = False
+DISABLE_REMOTE_IP_LABEL = False
+DISABLE_LOGIN_TIME_LABEL = False
 
 class FileOpenedHandler(FileSystemEventHandler):
     def on_modified(self, event):
@@ -39,7 +45,12 @@ class Session:
 
     def __eq__(self, other):
         return self.user == other.user and self.tty == other.tty and self.ip_addr == other.ip_addr and self.login_time == other.login_time
-
+    
+    def equal_labelset(self, other):
+        return ((DISABLE_USER_LABEL or self.user == other.user) 
+                and (DISABLE_TTY_LABEL or self.tty == other.tty) 
+                and (DISABLE_REMOTE_IP_LABEL or  self.ip_addr == other.ip_addr) 
+                and (DISABLE_LOGIN_TIME_LABEL or self.login_time == other.login_time))
 
 def get_utmp_data() -> list[Session]:
     """
@@ -53,7 +64,8 @@ def get_utmp_data() -> list[Session]:
         buffer = fd.read()
         for record in utmp.read(buffer):
             if record.type == utmp.UTmpRecordType.user_process:
-                    sessions.append(Session(record.user, record.line, record.host or "localhost", record.sec))
+                # TODO check addr0 for localhost
+                sessions.append(Session(record.user, record.line, record.host or "localhost", record.sec))
     return sessions
 
 
@@ -70,20 +82,21 @@ def handle_sessions_changed() -> None:
     for new_session in new_sessions:
         # Looking for newly found SSH sessions
         if not new_session in sessions:
-            print(f"Session connected: {str(new_session)}")
+            print(f"New session detected: {str(new_session)}")
             sessions.append(new_session)
             gauge_num_sessions.labels(user=new_session.user, tty=new_session.tty, remote_ip=new_session.ip_addr, login_time=new_session.login_time).set_function(gauge_num_sessions_func_decorator(new_session))
 
     for old_session in sessions:
         # Looking for SSH sessions that no longer exist
         if not old_session in new_sessions:
+            print(f"Closed session detected: {str(old_session)}")
             # prevent losing this session between prometheus scrapes
             if old_session.scraped:
-                print(f"Session disconnected and/or labelset removed: {str(old_session)}")
                 sessions.remove(old_session)
-                gauge_num_sessions.remove(old_session.user, old_session.tty, old_session.ip_addr, old_session.login_time)
+                if not sum([1 for s in sessions if old_session.equal_labelset(s)]):
+                    print("Removing labelset")
+                    gauge_num_sessions.remove(user=old_session.user, tty=old_session.tty, remote_ip=old_session.ip_addr, login_time=old_session.login_time)
             else:
-                print(f"Session disconnected: {str(old_session)}")
                 print("Waiting for next scrape before removing the labelset")
 
 
@@ -111,16 +124,74 @@ def parse_arguments() -> None:
 
 def gauge_num_sessions_func_decorator(gauge_session : Session) -> Callable[[], float]:
     def gauge_num_session_func() -> float:
-        # Due to removing the labelset after a disconnect, this function should always return 1.0 or not be called.
-        # everything in here is simply to play it safe
         global sessions
         # prevent losing this session between prometheus scrapes
-        if not gauge_session.scraped:
-            gauge_session.scraped = True
-            return 1.0
-        return float(gauge_session in sessions)
+        gauge = 0.0
+        for session in sessions:
+            if gauge_session.equal_labelset(session):
+                session.scraped = True
+                gauge += 1.0
+        return gauge
         
     return gauge_num_session_func
+
+
+class RobustGauge(prometheus_client.Gauge):
+    # if kwargs are used superfluous labels will be ignored
+    def labels(self : prometheus_client.Gauge, *labelvalues : Any, **labelkwargs : Any):
+        if not self._labelnames:
+            raise ValueError('No label names were set when constructing %s' % self)
+
+        if self._labelvalues:
+            raise ValueError('{} already has labels set ({}); can not chain calls to .labels()'.format(
+                self,
+                dict(zip(self._labelnames, self._labelvalues))
+            ))
+
+        if labelvalues and labelkwargs:
+            raise ValueError("Can't pass both *args and **kwargs")
+
+        if labelkwargs:
+            for l in self._labelnames:
+                if not l in labelkwargs:
+                    raise ValueError('Missing label name: {}'.format(l))
+            labelvalues = tuple(str(labelkwargs[l]) for l in self._labelnames)
+        else:
+            if len(labelvalues) != len(self._labelnames):
+                raise ValueError('Incorrect label count')
+            labelvalues = tuple(str(l) for l in labelvalues)
+        with self._lock:
+            if labelvalues not in self._metrics:
+                self._metrics[labelvalues] = self.__class__(
+                    self._name,
+                    documentation=self._documentation,
+                    labelnames=self._labelnames,
+                    unit=self._unit,
+                    _labelvalues=labelvalues,
+                    **self._kwargs
+                )
+            return self._metrics[labelvalues]
+        
+    def remove(self, *labelvalues: Any, **labelkwargs : Any) -> None:
+        if not self._labelnames:
+            raise ValueError('No label names were set when constructing %s' % self)
+        
+        if labelvalues and labelkwargs:
+            raise ValueError("Can't pass both *args and **kwargs")
+
+        if labelkwargs:
+            for l in self._labelnames:
+                if not l in labelkwargs:
+                    raise ValueError('Missing label name: {}'.format(l))
+            labelvalues = tuple(str(labelkwargs[l]) for l in self._labelnames)
+        else:
+            if len(labelvalues) != len(self._labelnames):
+                raise ValueError('Incorrect label count (expected %d, got %s)' % (len(self._labelnames), labelvalues))
+            labelvalues = tuple(str(l) for l in labelvalues)
+
+        """Remove the given labelset from the metric."""
+        with self._lock:
+            del self._metrics[labelvalues]
 
 
 if __name__ == "__main__":
@@ -132,17 +203,27 @@ if __name__ == "__main__":
     """
 
     parse_arguments()
+
+    labels = ["user", "tty", "remote_ip", "login_time"]
+    if DISABLE_USER_LABEL:
+        labels.remove("user")
+    if DISABLE_TTY_LABEL:
+        labels.remove("tty")
+    if DISABLE_REMOTE_IP_LABEL:
+        labels.remove("remote_ip")
+    if DISABLE_LOGIN_TIME_LABEL:
+        labels.remove("login_time")
     
-    gauge_num_sessions = prometheus_client.Gauge(
-        "ssh_num_sessions", "Number of SSH sessions", ["user", "tty", "remote_ip", "login_time"])
+    gauge_num_sessions = RobustGauge(
+        "ssh_num_sessions", "Number of SSH sessions", labels)
     
     # sessions contains the current list of sessions
     sessions = get_utmp_data()
 
     # Initial metrics
     for initial_session in sessions:
-        gauge_num_sessions.labels(user=initial_session.user, tty=initial_session.tty, remote_ip=initial_session.ip_addr, login_time=initial_session.login_time).set_function(gauge_num_sessions_func_decorator(initial_session))
         print(f"Initial connection: {str(initial_session)}")
+        gauge_num_sessions.labels(user=initial_session.user, tty=initial_session.tty, remote_ip=initial_session.ip_addr, login_time=initial_session.login_time).set_function(gauge_num_sessions_func_decorator(initial_session))
 
 
     """
