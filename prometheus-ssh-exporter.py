@@ -122,9 +122,6 @@ if __name__ == '__main__':
 
     parse_arguments()
 
-    # Start up the server to expose the metrics.
-    prometheus_client.start_http_server(SERVER_PORT)
-    print("Started metrics server bound to {}:{}".format(SERVER_HOST, SERVER_PORT))
     gauge_num_sessions = prometheus_client.Gauge(
         'ssh_num_sessions', 'Number of SSH sessions', ['remote_ip', 'user', 'login_time'])
     
@@ -148,6 +145,10 @@ if __name__ == '__main__':
     observer = Observer()
     observer.schedule(event_handler, path=WATCHFILE, recursive=False)
     observer.start()
+
+    # Start up the server to expose the metrics.
+    prometheus_client.start_http_server(SERVER_PORT)
+    print("Started metrics server bound to {}:{}".format(SERVER_HOST, SERVER_PORT))
 
     # Generate some requests.
     print("Looking for SSH connection changes at interval {}".format(FETCH_INTERVAL))
