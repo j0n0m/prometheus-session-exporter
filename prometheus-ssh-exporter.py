@@ -22,8 +22,7 @@ class FileOpenedHandler(FileSystemEventHandler):
 
 
 class Session:
-    """ This class is used to create a Session object containing info on an SSH session, mainly for readability 
-    Only the fields name, tty, from_, login are actually used for now """
+    """ This class is used to create a Session object containing info on an SSH session, mainly for readability """
 
     def __init__(self, user : str, tty : str, ip_addr : str, login_time : str):
         self.user = user # Username that is logged in
@@ -44,7 +43,7 @@ class Session:
 
 def get_utmp_data() -> list[Session]:
     """
-    Returns a list of User Objects
+    Returns a list of Session Objects
     The function uses the utmp library. The utmp file contains information about ALL currently logged in users,
     including local users (not SSH sessions). We filter out the local users by checking if the remote IP address
     is empty and set the hostname for the local sessions to "localhost".
@@ -62,7 +61,7 @@ def get_utmp_data() -> list[Session]:
 def handle_sessions_changed() -> None:
     """ 
     This function fetches the current list of SSH sessions and compares it to the previous list of SSH sessions.
-    If the number of sessions has changed, it increments or decrements the gauge_num_sessions metric.
+    If the number of sessions has changed, it adds or removes labelsets to the gauge_num_sessions metric.
     """
     global sessions, gauge_num_sessions
 
@@ -127,7 +126,7 @@ def gauge_num_sessions_func_decorator(gauge_session : Session) -> Callable[[], f
 if __name__ == "__main__":
     """
     This program exports the number of SSH sessions as a metric "ssh_num_sessions" for prometheus.
-    It applies a label to each increment or decrement of that number, containing the remote IP address.
+    It applies labelsets to the gauge, containing the username, tty, remote IP address, and time of login.
     That way we can filter by the remote IP in Grafana, getting the number of SSH sessions by IP address,
     or sum them up to get the total number of sessions.
     """
