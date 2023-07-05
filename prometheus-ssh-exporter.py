@@ -4,6 +4,7 @@ import argparse
 import utmp
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler, FileModifiedEvent
+from typing import Callable
 
 
 # These defaults can be overwritten by command line arguments
@@ -23,24 +24,21 @@ class Session:
     """ This class is used to create a Session object containing info on an SSH session, mainly for readability 
     Only the fields name, tty, from_, login are actually used for now """
 
-    def __init__(self, name : str, tty : str, from_ : str, login : str, idle=0, jcpu=0, pcpu=0, what=0):
-        self.name = name # Username that is logged in
+    def __init__(self, user : str, tty : str, ip_addr : str, login_time : str):
+        self.user = user # Username that is logged in
         self.tty = tty # Which tty is used
-        self.from_ = from_ # remote IP address
-        self.login = login # time of login
-        self.idle = idle # unused
-        self.jcpu = jcpu # unused
-        self.pcpu = pcpu # unused
-        self.what = what # unused
+        self.ip_addr = ip_addr # remote IP address
+        self.login_time = login_time # time of login
+        self.scraped = False # has this session been scraped by prometheus
 
     def __str__(self):
-        return "%s %s" % (self.name, self.from_)
+        return "%s %s" % (self.user, self.ip_addr)
 
     def __repr__(self):
-        return "%s %s" % (self.name, self.from_)
+        return "%s %s" % (self.user, self.ip_addr)
 
     def __eq__(self, other):
-        return self.login == other.login and self.tty == other.tty and self.from_ == other.from_
+        return self.user == other.user and self.tty == other.tty and self.ip_addr == other.ip_addr and self.login_time == other.login_time
 
 
 def get_utmp_data() -> list[Session]:
@@ -50,13 +48,13 @@ def get_utmp_data() -> list[Session]:
     including local users (not SSH sessions). We filter out the local users by checking if the remote IP address
     is empty and set the hostname for the local sessions to "localhost".
     """
-    users : list[Session] = []
+    sessions : list[Session] = []
     with open('/var/run/utmp', 'rb') as fd:
         buffer = fd.read()
         for record in utmp.read(buffer):
             if record.type == utmp.UTmpRecordType.user_process:
-                    users.append(Session(record.user, record.line, record.host or 'localhost', record.sec))
-    return users
+                    sessions.append(Session(record.user, record.line, record.host or 'localhost', record.sec))
+    return sessions
 
 
 
@@ -65,23 +63,28 @@ def handle_sessions_changed() -> None:
     This function fetches the current list of SSH sessions and compares it to the previous list of SSH sessions.
     If the number of sessions has changed, it increments or decrements the gauge_num_sessions metric.
     """
-    global session_data, gauge_num_sessions
+    global sessions, gauge_num_sessions
 
-    old_session_data = session_data
+    new_sessions = get_utmp_data()
 
-    session_data = get_utmp_data()
-
-    for maybe_new_session in session_data:
+    for new_session in new_sessions:
         # Looking for newly found SSH sessions
-        if not maybe_new_session in old_session_data:
-            print("Session connected: %s" % maybe_new_session.from_)
-            gauge_num_sessions.labels(remote_ip=maybe_new_session.from_, user=session.name, login_time=session.login).inc()
+        if not new_session in sessions:
+            print("Session connected: %s" % new_session.ip_addr)
+            sessions.append(new_session)
+            gauge_num_sessions.labels(user=new_session.user, tty=new_session.tty, remote_ip=new_session.ip_addr, login_time=new_session.login_time).set_function(gauge_num_sessions_func_decorator(new_session))
 
-    for maybe_old_session in old_session_data:
+    for old_session in sessions:
         # Looking for SSH sessions that no longer exist
-        if not maybe_old_session in session_data:
-            print("Session disconnected: %s" % maybe_old_session.from_)
-            gauge_num_sessions.labels(remote_ip=maybe_old_session.from_, user=session.name, login_time=session.login).dec()
+        if not old_session in new_sessions:
+            # prevent losing this session between prometheus scrapes
+            if old_session.scraped:
+                print("Session disconnected and/or labelset removed: %s" % old_session.ip_addr)
+                sessions.remove(old_session)
+                gauge_num_sessions.remove(old_session.user, old_session.tty, old_session.ip_addr, old_session.login_time)
+            else:
+                print("Session disconnected: %s" % old_session.ip_addr)
+                print("Waiting for next scrape before removing the labelset")
 
 
 
@@ -106,6 +109,18 @@ def parse_arguments() -> None:
     SERVER_HOST = args.host
     WATCHFILE = args.file
 
+def gauge_num_sessions_func_decorator(gauge_session : Session) -> Callable[[], float]:
+    def gauge_num_session_func() -> float:
+        # Due to removing the labelset after a disconnect, this function should always return 1.0 or not be called.
+        # everything in here is simply to play it safe
+        global sessions
+        # prevent losing this session between prometheus scrapes
+        if not gauge_session.scraped:
+            gauge_session.scraped = True
+            return 1.0
+        return float(gauge_session in sessions)
+        
+    return gauge_num_session_func
 
 
 if __name__ == '__main__':
@@ -116,19 +131,18 @@ if __name__ == '__main__':
     or sum them up to get the total number of sessions.
     """
 
-
     parse_arguments()
-
+    
     gauge_num_sessions = prometheus_client.Gauge(
-        'ssh_num_sessions', 'Number of SSH sessions', ['remote_ip', 'user', 'login_time'])
+        'ssh_num_sessions', 'Number of SSH sessions', ['user', 'tty', 'remote_ip', 'login_time'])
     
-    # session_data contains the current list of sessions
-    session_data = get_utmp_data()
-    
+    # sessions contains the current list of sessions
+    sessions = get_utmp_data()
+
     # Initial metrics
-    for session in session_data:
-        gauge_num_sessions.labels(remote_ip=session.from_, user=session.name, login_time=session.login).inc()
-        print("Initial connection: {}".format(session.from_))
+    for initial_session in sessions:
+        gauge_num_sessions.labels(user=initial_session.user, tty=initial_session.tty, remote_ip=initial_session.ip_addr, login_time=initial_session.login_time).set_function(gauge_num_sessions_func_decorator(initial_session))
+        print("Initial connection: {}".format(initial_session.ip_addr))
 
 
     """
