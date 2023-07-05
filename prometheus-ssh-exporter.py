@@ -215,7 +215,7 @@ if __name__ == "__main__":
         labels.remove("login_time")
     
     gauge_num_sessions = RobustGauge(
-        "num_sessions", "Number of sessions", labels)
+        "sessions_num", "Number of sessions", labels)
     
     # sessions contains the current list of sessions
     sessions = get_utmp_data()

@@ -28,5 +28,5 @@ Make sure it's indented correctly!
 
 ## Usage
 
-You can go to your prometheus dashboard in the web browser and query num_sessions.
+You can go to your prometheus dashboard in the web browser and query sessions_num.
 If everything is set up correctly you should get the metrics.
